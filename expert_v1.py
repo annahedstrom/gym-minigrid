@@ -8,25 +8,28 @@ from optparse import OptionParser
 import ipdb
 import random
 
-#import matplotlib.pyplot as plt
+import matplotlib.pyplot as plt
 
 class ExpertClass():
-    def __init__(self,env,tau_num,tau_len):
+    def __init__(self,env):
 
         # obviously a bad way to find #states. TODO: find alternative
         self.gridSize = env.gridSize
         self.num_states = self.gridSize*self.gridSize
 
-        self.epsilon = 0.5;
+        self.epsilon = 0.2
         
-        self.q = np.zeros((self.num_states, env.action_space.n)); 
+        self.q = np.zeros((self.num_states, env.action_space.n));
+        self.deep_q = []
+        self.alike = np.ones(self.num_states, dtype=np.bool)
 
-        #self.init_value_plot()
+        self.init_value_plot()
 
         ## initialize trajectory details ##
         # tau_i := {TAU_S[i,0],TAU_A[i,0], TAU_S[i,1],TAU_A[i,1], ..., TAU_S[i,T],TAU_A[i,T]}
-        self.tau_num = tau_num;
-        self.tau_len = tau_len;
+
+        self.tau_num = 10; # number of trajectories
+        self.tau_len = 15; env.maxSteps = self.tau_len; # length of each trajectory
 
         self.TAU_S = np.zeros((self.tau_len, self.tau_num)) # matrix of states with all trajectories
         self.TAU_A = np.zeros((self.tau_len, self.tau_num)) # matrix of actions with all trajectories
@@ -69,6 +72,8 @@ class ExpertClass():
 
         # get value from q-function
         q_max = np.max(self.q,1)
+        self.deep_q.append(q_max)
+        self.deep_q.append(q_max)
         v = np.reshape(q_max,(self.gridSize,self.gridSize))
 
         # plot value function
@@ -78,12 +83,17 @@ class ExpertClass():
         plt.show();
         
     def see_value_plot(self):
-        q_max = np.max(self.q,1)        
+        q_max = np.max(self.q,1)
+        self.deep_q.append(q_max)
         v = np.reshape(q_max,(self.gridSize,self.gridSize))        
         self.v_plotter.set_data(v)
         plt.clim(v.min(),v.max()) 
         plt.draw(); plt.show()
         plt.pause(0.0001)
+
+    def test_convergence(self):
+        if np.array_equal(np.isclose(self.deep_q[-1], self.deep_q[-2], 0.01), self.alike):
+            return True
         
     def update(self,env,episode,STORE):
         
@@ -99,12 +109,13 @@ class ExpertClass():
 
         self.update_q(s,a,r,s_prime)
 
-        #if done:
-        #    self.see_value_plot()
+        if done:
+            self.see_value_plot()
 
         if(STORE):
             self.store_tau(episode,env.stepCount-1,s,a);
-
+            Q = self.deep_q[-1]
+            np.savetxt("Q", Q)
         return done
         
             

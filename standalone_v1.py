@@ -9,11 +9,10 @@ import time
 from optparse import OptionParser
 
 import gym_minigrid
-import expert
+import expert_v1 as expert
 import inverse_agent
 
 def main():
-    
     basic_mode = True
     expert_mode = True
     inverse_mode = False
@@ -29,51 +28,63 @@ def main():
     )
     (options, args) = parser.parse_args()
 
-    # trajectory data parameters
-    tau_num = 1; # number of trajectories
-    tau_len = 15; # length of each trajectories
-    
     # Load the gym environment
     env = gym.make(options.env_name)
-    env.maxSteps = tau_len; # maximum time for an episode = length of our trajectory
-        
+
     # Load expert agent / inverse learner
-    q_expert = expert.ExpertClass(env,tau_num,tau_len)
-    maxent_learner = inverse_agent.InverseAgentClass(env,tau_num,tau_len)        
+    q_expert = expert.ExpertClass(env)
+    maxent_learner = inverse_agent.InverseAgentClass(env)        
 
     ## expert_mode: get expert trajectories
 
-    #renderer = env.render('human')
+    renderer = env.render('human')
+    min_runs = 100
+    runs = 0
         
     for episode in range(10):
-        for t in range(tau_len):
+        for t in range(100):
             
             if(q_expert.update(env,episode,False)):
                 q_expert.reset(env)
                 break
             
-            #env.render('human')
-            #time.sleep(0.01)
+            env.render('human')
+            time.sleep(0.01)
             
+            # If the window was closed
+            if renderer.window == None:
+                break
+        
     q_expert.reset(env)
         
-    for episode in range(1):
-        for t in range(tau_len):
+    for episode in range(10):
+        for t in range(15):
+
             if(q_expert.update(env,episode,True)):
                 q_expert.reset(env)
                 break
+
+            if runs > min_runs:
+                if q_expert.test_convergence() == True:
+                    print("break")
+                    break
+
+            env.render('human')
+            time.sleep(0.01)
             
-            #env.render('human')
-            #time.sleep(0.01)
-            
-    ## get traj    
+            # If the window was closed
+            if renderer.window == None:
+                break
+
+    ## get traj
     TAU = q_expert.get_tau();
-    print(TAU)
+    print("TAU_S:",TAU[0])
+    print("TAU_A:",TAU[1])
     
     ## inverse RL mode: learn MaxEnt IRL from trajectories
 
-    maxent_learner.store_trajectories(TAU);
-    maxent_learner.update_psi(env) 
+    #maxent_learner.store_trajectories(TAU);
+    #maxent_learner.get_state_visitation_frequency(env) 
 
 if __name__ == "__main__":
     main()
