@@ -7,7 +7,6 @@ import time
 from optparse import OptionParser
 import ipdb
 import random
-import itertools
 
 import matplotlib.pyplot as plt
 
@@ -16,7 +15,7 @@ import matplotlib.pyplot as plt
 # -----------------------------
 class InverseAgentClass():
     
-    def __init__(self, env, test_env, tau_num, tau_len, risk_mode):
+    def __init__(self, env, tau_num, tau_len):
 
         self.tau_num = tau_num; # number of trajectories
         self.tau_len = tau_len; # length of each trajectory
@@ -33,96 +32,20 @@ class InverseAgentClass():
         self.pi = (self.pi.T/np.sum(self.pi,1)).T
         self.value = np.zeros((self.num_states))
 
-        self.risk_mode = risk_mode
-
         ## REWARD
         self.psi = np.random.rand(self.num_states); # reward function parameter
 
         ## plot reward function
-        self.init_reward_plot()
+        #self.init_reward_plot()
 
     # STEP:0 store all trajectories data (states and actions seperately)
     def store_trajectories(self, TAU):
         self.TAU_S = TAU[0];
         self.TAU_A = TAU[1];
 
-    # Check if traning and test environments are the same. If they differ; say state 16 is no longer
-    # "empty" but an "unknown" object, we need to alter our policy for risk.
-    def env_check(self, env, test_env):
-        env_states = self.sensor_uncertainty(env)
-        test_states = self.sensor_uncertainty(test_env)
-
-        if env_states[1] == test_states[1]:
-            # print("train and test env are identical")
-            return 1
-        else:
-            # print("train and test env differ")
-            return 0
-
-    # Sensor to get the object type or other properties for our states that was included in the expert trajectories.
-    # This information allow us to interpret the expert trajectories as a "proxy" rather than taking them at face value.
-    def sensor_uncertainty(self, env):
-
-        known = ['goal', 'wall', 'flag']
-        self.risk_types = []
-
-        # Check object types of expert trajectories.
-        for traj in self.TAU_S.T:
-            for s in traj:
-                states = (int(s % self.gridSize), int(s / self.gridSize))
-
-                check = env.grid.get(*states)
-                empty = env.grid.get(*states) == None
-                object = env.grid.get(*states) != None
-
-                # Classify risk based on uncertainty level.
-                if empty:
-                    self.risk_types.append((s, 0))                      # empty grid
-                elif object and any(i in check.type for i in known):
-                    self.risk_types.append((s, 1))                      # known object
-                else:
-                    self.risk_types.append((s, "?"))                    # uncertainty identified
-
-        return self.risk_types
-
-    # Determine how neighbouring states should behave according to some identified uncertain state.
-    # E.g. if we want a risk-averse agent we can set the probability to zero of going to that risky state.
-    def alter_policy_for_risk(self):
-
-        # Identify risky states.
-        risky_s = np.unique([s for (s, risk) in self.risk_types if risk == "?"])
-
-        # Identify concerned neighbours with respect to our risky states.
-        for i in range(len(risky_s)):
-            turn = 0
-            idy, idx = (int(risky_s[i] % self.gridSize), int(risky_s[i] / self.gridSize))
-            neighbour_idx = np.vstack((idx - 1, idx + 1, idx, idx)); neighbour_idy = np.vstack((idy, idy, idy - 1, idy + 1))
-            num_neighbour = len(neighbour_idy)
-
-            for j in range(num_neighbour):
-                x = []; y = []
-                x.append(neighbour_idx[j]); y.append(neighbour_idy[j])
-                x = np.ndarray.flatten(np.array(x)); y = np.ndarray.flatten(np.array(y))
-                nei_coor = (y + self.gridSize * x)
-
-
-                # KEY: Policy implementation.
-                # Determine how to alter our policy, pi(a|s;theta), e.g. as below with forbidden actions.
-                if turn == 0 and x[0] >= 0 and y[0] >= 0:
-                    self.pi[nei_coor, 3] = 0                # Down action is forbidden for the cell above our risky state.
-                if turn == 1 and x[0] >= 0 and y[0] >= 0:
-                    self.pi[nei_coor, 2] = 0                # Up action is forbidden for the cell below our risky state.
-                if turn == 2 and x[0] >= 0 and y[0] >= 0:
-                    self.pi[nei_coor, 1] = 0                # Right action is forbidden for the cell left to our risky state.
-                if turn == 3 and x[0] >= 0 and y[0] >= 0:
-                    self.pi[nei_coor, 0] = 0                # Left action is forbidden for the cell right to our risky state.
-                turn += 1
-
-        return self.pi
-
     ## STEP:1 value-iteration
     ## perform value iteration with the current R(s;psi) and update pi(a|s;theta)
-    def value_iteration(self,env, test_env):
+    def value_iteration(self,env):
 
         value_threshold = 0.001;
         
@@ -130,7 +53,7 @@ class InverseAgentClass():
             update_difference = -999;
             for s in range(self.num_states):
                 old_value = self.value[s]
-                self.value[s] = np.max( [np.sum([env.T_sas(s,a,s_prime)*(self.reward(s_prime)+self.gamma*self.value[s_prime])
+                self.value[s] = np.max( [np.sum([ env.T_sas(s,a,s_prime)*(self.reward(s_prime)+self.gamma*self.value[s_prime])
                                                   for s_prime in range(self.num_states)])
                                          for a in range(self.num_actions)])
                 update_difference = max(update_difference, abs(old_value-self.value[s]))
@@ -147,12 +70,10 @@ class InverseAgentClass():
             for a in range(self.num_actions):
                 #self.pi[s,a] = 1.0 if a==greedy_action else 0.0;
                 self.pi[s,a] = np.exp(np.sum([ env.T_sas(s,a,s_prime)*(self.reward(s_prime)+self.gamma*self.value[s_prime]) for s_prime in range(self.num_states)]))
-
-                # First, if risk mode is on and the environment differ - we will include a risk-criterion in our policy.
-                if self.risk_mode == True and self.env_check(env, test_env) == 0:
-                    self.alter_policy_for_risk()
                 
             self.pi[s,:] /= np.sum(self.pi[s,:])
+
+        ## TODO: CHECK FOR CORRECTNESS OF PI!
 
     ## get reward: r(s;psi)
     ## reward function is linear r(s;pi)= psi(i) phi(i)
@@ -219,45 +140,31 @@ class InverseAgentClass():
         plt.draw(); plt.show()
         plt.pause(0.0001)
 
-    def compute_entropy(self, PRINT):
+    def compute_entropy(self):
         fig = plt.figure(figsize=(5,5))
         state_entropy = np.zeros([self.num_states])
         for tau_i in self.TAU_S.T:
             for tau_it in tau_i:
                 if(tau_it>=0):
                     state_entropy[int(tau_it)] += 1.0
-        state_entropy = state_entropy
-        state_entropy_norm = state_entropy / np.sum(self.TAU_S >= 0)
+        state_entropy = state_entropy/np.sum(self.TAU_S>=0)
         plt.imshow(np.reshape(state_entropy,(5,5)),interpolation='none', cmap='viridis')
-
-        if (PRINT):
-            print("state_entropy", np.reshape(state_entropy, (self.gridSize, self.gridSize)))
-            print("state_entropy_norm", np.reshape(state_entropy_norm, (self.gridSize, self.gridSize)))
-            plt.colorbar();
-            plt.xticks([]);
-            plt.yticks([]);
-            plt.title('state prob');
-            plt.ioff();
-            plt.show();
-
-    def plot_gradient(self, gradient):
-        fig = plt.figure(figsize=(5, 5))
-        plt.plot(gradient)
-        plt.title('gradient');
-        plt.show()
-
-    def update(self,env,test_env, PRINT):
+        print(state_entropy)
+        plt.colorbar(); plt.xticks([]); plt.yticks([]);        
+        plt.title('state prob'); plt.ioff(); plt.show();
+        ipdb.set_trace()
+        
+    def update(self,env,PRINT):
 
         mu_tau = self.get_state_visitation_frequency_under_TAU(env)
-        visits = self.compute_entropy(False)
         counter = 0;
-        max_epochs = 5
-        gradient = []
+
+        self.compute_entropy()
         
-        while counter < max_epochs:
+        while False:
             # STEP:1
             # solve for optimal policy: do policy iteration on r(s;psi)
-            self.value_iteration(env, test_env);
+            self.value_iteration(env);
             
             # STEP:2
             # compute state-visitation frequencies under tau / otherwise
@@ -270,17 +177,10 @@ class InverseAgentClass():
             # STEP:4
             # update psi of r(s;psi)
             self.psi = self.psi + self.alpha*grad;
-            counter += 1;
-
+            counter+=1;
 
             print("f_tau=",np.sum(mu_tau/self.tau_num)," mu=",np.sum(mu)," gradient=",np.sum(grad))
 
             #self.see_reward_plot()
-
-            gradient.append(np.sum(grad))
-
-        #self.plot_gradient(gradient)
-
-
-
-
+            
+        print("updating..")    
